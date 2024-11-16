@@ -506,7 +506,7 @@ void DisplayServerWindows::_thread_fd_monitor(void *p_ud) {
 	}
 	if (filter_names.is_empty()) {
 		filter_exts.push_back(String("*.*").utf16());
-		filter_names.push_back(RTR("All Files").utf16());
+		filter_names.push_back((RTR("All Files") + " (*)").utf16());
 	}
 
 	Vector<COMDLG_FILTERSPEC> filters;
@@ -1422,7 +1422,7 @@ void DisplayServerWindows::screen_set_keep_on(bool p_enable) {
 	}
 
 	if (p_enable) {
-		const String reason = "Godot Engine running with display/window/energy_saving/keep_screen_on = true";
+		const String reason = "Merlin Engine running with display/window/energy_saving/keep_screen_on = true";
 		Char16String reason_utf16 = reason.utf16();
 
 		REASON_CONTEXT context;
@@ -1552,6 +1552,9 @@ void DisplayServerWindows::show_window(WindowID p_id) {
 		_update_window_style(p_id);
 	}
 
+	if (wd.hidden) {
+		return;
+	}
 	if (wd.maximized) {
 		ShowWindow(wd.hWnd, SW_SHOWMAXIMIZED);
 		SetForegroundWindow(wd.hWnd); // Slightly higher priority.
@@ -2176,7 +2179,7 @@ void DisplayServerWindows::_get_window_style(bool p_main_window, bool p_initiali
 		r_style_ex |= WS_EX_TOPMOST | WS_EX_NOACTIVATE;
 	}
 
-	if (!p_borderless && !p_no_activate_focus && p_initialized) {
+	if (!p_borderless && !p_no_activate_focus && p_initialized && !p_hidden) {
 		r_style |= WS_VISIBLE;
 	}
 
@@ -2293,7 +2296,6 @@ void DisplayServerWindows::window_set_mode(WindowMode p_mode, WindowID p_window)
 		wd.minimized = false;
 
 		_update_window_style(p_window, false);
-
 		MoveWindow(wd.hWnd, pos.x, pos.y, size.width, size.height, TRUE);
 
 		// If the user has mouse trails enabled in windows, then sometimes the cursor disappears in fullscreen mode.
@@ -2351,7 +2353,9 @@ void DisplayServerWindows::window_set_flag(WindowFlags p_flag, bool p_enabled, W
 			wd.borderless = p_enabled;
 			_update_window_style(p_window);
 			_update_window_mouse_passthrough(p_window);
-			ShowWindow(wd.hWnd, (wd.no_focus || wd.is_popup) ? SW_SHOWNOACTIVATE : SW_SHOW); // Show the window.
+			if (!wd.hidden) {
+				ShowWindow(wd.hWnd, (wd.no_focus || wd.is_popup) ? SW_SHOWNOACTIVATE : SW_SHOW); // Show the window.
+			}
 		} break;
 		case WINDOW_FLAG_ALWAYS_ON_TOP: {
 			ERR_FAIL_COND_MSG(wd.transient_parent != INVALID_WINDOW_ID && p_enabled, "Transient windows can't become on top.");
@@ -2405,6 +2409,10 @@ void DisplayServerWindows::window_set_flag(WindowFlags p_flag, bool p_enabled, W
 			ERR_FAIL_COND_MSG(IsWindowVisible(wd.hWnd) && (wd.is_popup != p_enabled), "Popup flag can't changed while window is opened.");
 			ERR_FAIL_COND_MSG(p_enabled && wd.parent_hwnd, "Embedded window can't be popup.");
 			wd.is_popup = p_enabled;
+		} break;
+		case WINDOW_FLAG_HIDDEN: {
+			wd.hidden = p_enabled;
+			_update_window_style(p_window);
 		} break;
 		default:
 			break;
@@ -2843,7 +2851,7 @@ Error DisplayServerWindows::embed_process(WindowID p_window, OS::ProcessID p_pid
 	if (p_rect.size.x < 100 || p_rect.size.y < 100) {
 		p_visible = false;
 	}
-
+  
 	// In Godot, the window position is offset by the screen's origin coordinates.
 	// We need to adjust for this when a screen is positioned in the negative space
 	// (e.g., a screen to the left of the main screen).
@@ -5526,6 +5534,9 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 				}
 			}
 		} break;
+		case WM_SHOWWINDOW: {
+			windows[window_id].hidden = !wParam;
+		} break;
 		default: {
 			if (user_proc) {
 				return CallWindowProcW(user_proc, hWnd, uMsg, wParam, lParam);
@@ -5875,6 +5886,8 @@ DisplayServer::WindowID DisplayServerWindows::_create_window(WindowMode p_mode, 
 			DWORD value = wd.sharp_corners ? DWMWCP_DONOTROUND : DWMWCP_DEFAULT;
 			::DwmSetWindowAttribute(wd.hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, &value, sizeof(value));
 		}
+
+		wd.hidden = (p_flags & WINDOW_FLAG_HIDDEN_BIT);
 
 		if (is_dark_mode_supported() && dark_title_available) {
 			BOOL value = is_dark_mode();

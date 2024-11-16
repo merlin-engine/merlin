@@ -1795,6 +1795,10 @@ void DisplayServerX11::show_window(WindowID p_id) {
 	const WindowData &wd = windows[p_id];
 	popup_open(p_id);
 
+	if (wd.hidden) {
+		return;
+	}
+
 	DEBUG_LOG_X11("show_window: %lu (%u) \n", wd.x11_window, p_id);
 
 	XMapWindow(x11_display, wd.x11_window);
@@ -4651,7 +4655,7 @@ void DisplayServerX11::process_events() {
 					break;
 				}
 
-				const WindowData &wd = windows[window_id];
+				WindowData &wd = windows[window_id];
 
 				XWindowAttributes xwa;
 				XSync(x11_display, False);
@@ -4664,8 +4668,19 @@ void DisplayServerX11::process_events() {
 					_set_input_focus(wd.x11_window, RevertToPointerRoot);
 				}
 
+				wd.hidden = false;
+
 				// Have we failed to set fullscreen while the window was unmapped?
 				_validate_mode_on_map(window_id);
+			} break;
+
+			case UnmapNotify: {
+				DEBUG_LOG_X11("[%u] UnmapNotify window=%lu (%u) \n", frame, event.xmap.window, window_id);
+				if (ime_window_event) {
+					break;
+				}
+				WindowData &wd = windows[window_id];
+				wd.hidden = true;
 			} break;
 
 			case Expose: {
@@ -5836,6 +5851,10 @@ DisplayServerX11::WindowID DisplayServerX11::_create_window(WindowMode p_mode, V
 
 	if (p_flags & WINDOW_FLAG_POPUP_BIT) {
 		wd.is_popup = true;
+	}
+
+	if (p_flags & WINDOW_FLAG_HIDDEN_BIT) {
+		wd.hidden = true;
 	}
 
 	// Setup for menu subwindows:
